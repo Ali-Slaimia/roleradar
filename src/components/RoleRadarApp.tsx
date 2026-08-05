@@ -243,6 +243,16 @@ export function RoleRadarApp() {
                     </span>
                   ))}
                 </div>
+                <div className="mt-3 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                  <a
+                    className="btn btn-accent !py-1.5 !text-xs"
+                    href={job.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Apply
+                  </a>
+                </div>
               </button>
             ))}
             {!loading && !data?.jobs.length ? (
@@ -269,16 +279,32 @@ export function RoleRadarApp() {
                   {selected.description.length >= 400 ? "…" : ""}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <a className="btn btn-accent" href={selected.url} target="_blank" rel="noreferrer">
-                    Open listing
+                  <a
+                    className="btn btn-accent"
+                    href={selected.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Apply on {selected.source}
                   </a>
-                  <button className="btn" onClick={() => runAi("apply")} disabled={!!aiBusy}>
-                    {aiBusy === "apply" ? "Drafting…" : "AI apply pack"}
+                  <button
+                    className="btn"
+                    onClick={async () => {
+                      await runAi("apply");
+                      window.open(selected.url, "_blank", "noopener,noreferrer");
+                    }}
+                    disabled={!!aiBusy}
+                  >
+                    {aiBusy === "apply" ? "Drafting…" : "Draft pack + Apply"}
                   </button>
                   <button className="btn" onClick={() => runAi("interview")} disabled={!!aiBusy}>
                     {aiBusy === "interview" ? "Preparing…" : "Interview prep"}
                   </button>
                 </div>
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  Apply opens the real board/employer page — RoleRadar cannot submit to their ATS
+                  for you.
+                </p>
               </div>
 
               <div className="rounded-2xl border border-[var(--line)] p-4">
@@ -293,9 +319,19 @@ export function RoleRadarApp() {
 
               {applyPack ? (
                 <div className="space-y-3 rounded-2xl border border-[var(--accent)]/40 bg-[rgba(46,196,182,0.07)] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
-                    Apply pack · {applyPack.model}
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
+                      Apply pack · {applyPack.model}
+                    </p>
+                    <a
+                      className="btn btn-accent !py-1.5 !text-xs"
+                      href={selected.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Apply now
+                    </a>
+                  </div>
                   <Block title="Elevator pitch" text={applyPack.elevatorPitch} />
                   <Block title="Cover letter" text={applyPack.coverLetter} />
                   <List title="Why you fit" items={applyPack.whyYouFit} />
