@@ -8,11 +8,12 @@
 
 | Feature | What it proves |
 | --- | --- |
-| Live job board | Multi-source aggregation, caching, dedupe, filters (Europe / visa / TN-friendly) |
-| Match score | Deterministic skills + geo/visa signals vs editable profile |
-| AI apply pack | Elevator pitch, cover letter, CV bullets, outreach DM, risks |
-| Interview prep | Role-specific questions + story bank from SkyPulse / GOLRI / WAFA |
-| Security | Server-only fetches, rate limits, Zod validation, CSP headers, prompt-injection screen |
+| Live job board | Multi-source aggregation from **Remotive, RemoteOK, Arbeitnow, Jobicy** |
+| CV scan | Upload PDF/TXT → AI extracts profile → you confirm → jobs re-ranked |
+| Match score | Skills overlap + Europe/visa/remote signals |
+| AI apply pack | Elevator pitch, cover letter, CV bullets, outreach DM |
+| Interview prep | Role-specific questions + story bank |
+| Security | Server-only fetches, rate limits, Zod, CSP, prompt-injection screen |
 
 ## Run
 

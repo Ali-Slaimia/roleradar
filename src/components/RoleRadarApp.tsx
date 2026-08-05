@@ -28,11 +28,21 @@ type Job = {
   match: Match;
 };
 
+type SourceInfo = {
+  id: string;
+  name: string;
+  url: string;
+  api: string;
+  focus: string;
+};
+
 type JobsPayload = {
   jobs: Job[];
   total: number;
   notices: string[];
   sources: string[];
+  sourcesCatalog?: SourceInfo[];
+  scoredWithSkills?: string[];
   fromCache: boolean;
   method: string;
   error?: string;
@@ -63,7 +73,12 @@ type Profile = {
   skills: string[];
   highlights: string[];
   projects: Array<{ name: string; blurb: string; url?: string }>;
+  languages?: string[];
+  email?: string | null;
+  confidence?: string;
 };
+
+const PROFILE_KEY = "roleradar-confirmed-profile";
 
 export function RoleRadarApp() {
   const [q, setQ] = useState("");
@@ -78,9 +93,18 @@ export function RoleRadarApp() {
   const [interview, setInterview] = useState<InterviewPack | null>(null);
   const [aiBusy, setAiBusy] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [draft, setDraft] = useState<Profile | null>(null);
+  const [cvText, setCvText] = useState("");
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [cvModel, setCvModel] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+
+  const activeSkills = draft?.skills?.length
+    ? draft.skills
+    : profile?.skills || [];
 
   const load = useCallback(
-    async (refresh = false) => {
+    async (refresh = false, skillsOverride?: string[]) => {
       setLoading(true);
       setError(null);
       try {
@@ -90,6 +114,8 @@ export function RoleRadarApp() {
         if (tunisia) params.set("tunisia", "1");
         if (visa) params.set("visa", "1");
         if (refresh) params.set("refresh", "1");
+        const skills = skillsOverride || activeSkills;
+        if (skills.length) params.set("skills", skills.join("|"));
         const res = await fetch(`/api/jobs?${params}`);
         const json = (await res.json()) as JobsPayload;
         if (!res.ok) throw new Error(json.error || "Failed to load jobs");
@@ -98,6 +124,8 @@ export function RoleRadarApp() {
           setSelected(
             (prev) => (prev && json.jobs.find((j) => j.id === prev.id)) || json.jobs[0],
           );
+        } else {
+          setSelected(null);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed");
@@ -105,25 +133,85 @@ export function RoleRadarApp() {
         setLoading(false);
       }
     },
-    [q, europe, tunisia, visa],
+    [q, europe, tunisia, visa, activeSkills],
   );
 
   useEffect(() => {
-    load(false);
+    try {
+      const raw = localStorage.getItem(PROFILE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as Profile;
+        setProfile(saved);
+        setDraft(saved);
+        setConfirmed(true);
+      }
+    } catch {
+      /* ignore */
+    }
     fetch("/api/profile")
       .then((r) => r.json())
-      .then((j) => setProfile(j.profile))
+      .then((j) => {
+        setProfile((prev) => prev || j.profile);
+        setDraft((prev) => prev || j.profile);
+      })
       .catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    load(false);
   }, [load]);
 
-  async function runAi(mode: "apply" | "interview" | "match") {
+  async function scanCv() {
+    setAiBusy("cv");
+    setError(null);
+    try {
+      let res: Response;
+      if (cvFile) {
+        const form = new FormData();
+        form.set("file", cvFile);
+        if (cvText.trim()) form.set("text", cvText.trim());
+        res = await fetch("/api/cv/parse", { method: "POST", body: form });
+      } else {
+        res = await fetch("/api/cv/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: cvText }),
+        });
+      }
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "CV scan failed");
+      setDraft(json.draft);
+      setCvModel(json.model);
+      setConfirmed(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "CV scan failed");
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function confirmProfile() {
+    if (!draft) return;
+    setProfile(draft);
+    setConfirmed(true);
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(draft));
+    } catch {
+      /* ignore */
+    }
+    setApplyPack(null);
+    setInterview(null);
+    await load(false, draft.skills);
+  }
+
+  async function runAi(mode: "apply" | "interview") {
     if (!selected) return;
     setAiBusy(mode);
     try {
       const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: selected.id, mode: mode === "match" ? "match" : mode }),
+        body: JSON.stringify({ jobId: selected.id, mode }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "AI failed");
@@ -141,27 +229,202 @@ export function RoleRadarApp() {
     return Math.round(data.jobs.reduce((s, j) => s + j.match.score, 0) / data.jobs.length);
   }, [data]);
 
+  const catalog = data?.sourcesCatalog || [];
+
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-5 px-4 py-6 md:px-6">
       <header className="glass rounded-3xl p-6 md:p-8">
-        <p className="pill">Tunisia → Europe · live listings · AI apply packs</p>
+        <p className="pill">Tunisia → Europe · live listings · CV scan · AI apply packs</p>
         <h1 className="display mt-3 text-4xl font-extrabold tracking-tight md:text-5xl">
           RoleRadar
         </h1>
         <p className="mt-3 max-w-3xl text-base text-[var(--muted)] md:text-lg">
-          Real remote/EU job feeds scored against{" "}
-          <strong className="text-[var(--ink)]">{profile?.name || "Ali Slaimia"}</strong>
-          &apos;s stack — then AI drafts cover letters, CV bullets, and interview prep. Local AI
-          fallback works without an API key.
+          Upload your CV → AI extracts your profile → you confirm → we re-rank compatible jobs from
+          live boards. Then draft cover letters and hit Apply on the real listing.
         </p>
-        <div className="mt-5 flex flex-wrap gap-2">
-          {(profile?.projects || []).map((p) => (
-            <a key={p.name} href={p.url || "#"} className="pill !normal-case !tracking-normal" target="_blank" rel="noreferrer">
-              {p.name}
+      </header>
+
+      <section className="glass rounded-3xl p-4 md:p-5">
+        <h2 className="display text-xl font-bold">Where jobs come from</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          Real public APIs — not seeded demo data. Click through to each board.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {(catalog.length
+            ? catalog
+            : [
+                {
+                  id: "remotive",
+                  name: "Remotive",
+                  url: "https://remotive.com/remote-jobs",
+                  api: "https://remotive.com/api/remote-jobs",
+                  focus: "Remote software jobs",
+                },
+                {
+                  id: "remoteok",
+                  name: "RemoteOK",
+                  url: "https://remoteok.com",
+                  api: "https://remoteok.com/api",
+                  focus: "Remote tech roles",
+                },
+                {
+                  id: "arbeitnow",
+                  name: "Arbeitnow",
+                  url: "https://www.arbeitnow.com",
+                  api: "https://www.arbeitnow.com/api/job-board-api",
+                  focus: "Europe-focused board",
+                },
+                {
+                  id: "jobicy",
+                  name: "Jobicy",
+                  url: "https://jobicy.com",
+                  api: "https://jobicy.com/api/v2/remote-jobs",
+                  focus: "Remote jobs by skill",
+                },
+              ]
+          ).map((s) => (
+            <a
+              key={s.id}
+              href={s.url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-2xl border border-[var(--line)] bg-black/20 p-4 hover:border-[var(--accent)]"
+            >
+              <p className="display font-bold">{s.name}</p>
+              <p className="mt-1 text-sm text-[var(--muted)]">{s.focus}</p>
+              <p className="mt-2 text-[10px] text-[var(--accent)]">
+                {(data?.sources || []).includes(s.id) ? "active this fetch" : "source"}
+              </p>
             </a>
           ))}
         </div>
-      </header>
+      </section>
+
+      <section className="glass rounded-3xl p-4 md:p-5">
+        <h2 className="display text-xl font-bold">1. Scan your CV</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          PDF / TXT / MD or paste text. AI extracts skills & highlights — nothing is saved until you
+          confirm.
+        </p>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <label className="text-sm text-[var(--muted)]">
+            Paste CV text
+            <textarea
+              className="field mt-1 min-h-[140px]"
+              value={cvText}
+              onChange={(e) => setCvText(e.target.value)}
+              placeholder="Paste your CV here…"
+            />
+          </label>
+          <div className="space-y-3">
+            <label className="block text-sm text-[var(--muted)]">
+              Or upload file (PDF, TXT, MD · max 4MB)
+              <input
+                className="field mt-1"
+                type="file"
+                accept=".pdf,.txt,.md,application/pdf,text/plain"
+                onChange={(e) => setCvFile(e.target.files?.[0] || null)}
+              />
+            </label>
+            {cvFile ? (
+              <p className="text-sm text-[var(--accent)]">Selected: {cvFile.name}</p>
+            ) : null}
+            <button
+              className="btn btn-accent"
+              onClick={scanCv}
+              disabled={!!aiBusy || (!cvText.trim() && !cvFile)}
+            >
+              {aiBusy === "cv" ? "Scanning…" : "Scan CV with AI"}
+            </button>
+            {cvModel ? (
+              <p className="text-xs text-[var(--muted)]">Parser: {cvModel}</p>
+            ) : null}
+          </div>
+        </div>
+
+        {draft ? (
+          <div className="mt-5 rounded-2xl border border-[var(--line)] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="display text-lg font-bold">2. Confirm extracted profile</h3>
+              {confirmed ? (
+                <span className="pill !border-[var(--accent)] !text-[var(--accent)]">
+                  Confirmed — ranking jobs
+                </span>
+              ) : (
+                <span className="pill">Needs your confirmation</span>
+              )}
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <Field
+                label="Name"
+                value={draft.name}
+                onChange={(v) => setDraft({ ...draft, name: v })}
+              />
+              <Field
+                label="Title"
+                value={draft.title}
+                onChange={(v) => setDraft({ ...draft, title: v })}
+              />
+              <Field
+                label="Location"
+                value={draft.location}
+                onChange={(v) => setDraft({ ...draft, location: v })}
+              />
+              <Field
+                label="Target"
+                value={draft.target}
+                onChange={(v) => setDraft({ ...draft, target: v })}
+              />
+            </div>
+            <label className="mt-3 block text-sm text-[var(--muted)]">
+              Skills (comma-separated)
+              <input
+                className="field mt-1"
+                value={draft.skills.join(", ")}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    skills: e.target.value
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </label>
+            <label className="mt-3 block text-sm text-[var(--muted)]">
+              Highlights (one per line)
+              <textarea
+                className="field mt-1 min-h-[100px]"
+                value={draft.highlights.join("\n")}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    highlights: e.target.value
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </label>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button className="btn btn-accent" onClick={confirmProfile} disabled={!draft.skills.length}>
+                Confirm → show compatible jobs
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  localStorage.removeItem(PROFILE_KEY);
+                  setConfirmed(false);
+                }}
+              >
+                Clear saved profile
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </section>
 
       <section className="glass rounded-3xl p-4 md:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-end">
@@ -197,7 +460,13 @@ export function RoleRadarApp() {
           <span>
             Avg match <strong className="score">{avg || "—"}</strong>
           </span>
-          <span>Sources: {(data?.sources || []).join(", ") || "—"}</span>
+          <span>
+            Scoring with{" "}
+            <strong className="text-[var(--ink)]">
+              {(data?.scoredWithSkills || activeSkills).slice(0, 5).join(", ") || "default profile"}
+            </strong>
+            {(data?.scoredWithSkills || activeSkills).length > 5 ? "…" : ""}
+          </span>
           {data?.fromCache ? <span>cache</span> : <span>live fetch</span>}
         </div>
         {data?.notices?.length ? (
@@ -302,8 +571,7 @@ export function RoleRadarApp() {
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-[var(--muted)]">
-                  Apply opens the real board/employer page — RoleRadar cannot submit to their ATS
-                  for you.
+                  Apply opens the real board/employer page — RoleRadar cannot submit to their ATS.
                 </p>
               </div>
 
@@ -362,6 +630,23 @@ export function RoleRadarApp() {
 
       <p className="px-1 pb-6 text-xs text-[var(--muted)]">{data?.method}</p>
     </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="text-sm text-[var(--muted)]">
+      {label}
+      <input className="field mt-1" value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
   );
 }
 
