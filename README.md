@@ -40,3 +40,7 @@ See `CV_BLURB.md`.
 ## Attribution
 
 Job data © respective boards (Remotive, RemoteOK, Arbeitnow, Jobicy). RoleRadar is an independent portfolio tool — not affiliated with employers.
+
+## Author
+
+**[Ali Slaimia](https://github.com/Ali-Slaimia)** — sole author and maintainer.
